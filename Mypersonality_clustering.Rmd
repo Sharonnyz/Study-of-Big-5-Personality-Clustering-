@@ -1,0 +1,842 @@
+---
+title: "MATH 656 Final Project"
+date: "2022-12-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(warn=-1)
+```
+
+
+```{r}
+MyPersonality<- read.csv("Mypersonality.csv", header=TRUE)
+```
+
+## Prepare the Data
+```{r}
+Personality<- MyPersonality[,-3:-8]
+#Personality
+```
+
+# Dealing with missing values
+```{r}
+P_na<-Personality[6400,]
+Personality[6400,][2]<-'To those with interest in international politics and policy I recommend : "THE POST-AMERICAN WORLD" By *PROPNAME*'
+Personality[6400,][3]<- 254.0
+Personality[6400,][4]<- 29724.90
+Personality[6400,][5]<- 93.25	
+Personality[6400,][6]<- 0.04	
+Personality[6400,][7]<-30978.00
+Personality[6400,][8]<-0.49
+Personality[6400,][9]<-0.18
+which(is.na(Personality))
+```
+
+```{r,warning=FALSE}
+library(tidyverse)
+library(stringr)
+library(NLP)
+library(tm)
+library(SnowballC)
+library(factoextra)
+library(dplyr)
+library(tidytext)
+library(textdata)
+```
+
+
+#Count the number of the posts by each user
+```{r}
+Personality1<-Personality %>%
+     group_by(X.AUTHID) %>% arrange(STATUS) %>%
+     summarise(STATUS1=paste(STATUS,collapse=","),num_of_post=length(STATUS),NETWORKSIZE=NETWORKSIZE,BETWEENNESS=BETWEENNESS,NBETWEENNESS=NBETWEENNESS,DENSITY=DENSITY,BROKERAGE=BROKERAGE,NBROKERAGE=NBROKERAGE,TRANSITIVITY=TRANSITIVITY,cEXT=cEXT,cNEU=cNEU,cAGR=cAGR,cCON=cCON,cOPN=cOPN)%>%
+     arrange(desc(num_of_post), STATUS1)
+Personality1<-Personality1 %>% distinct(X.AUTHID, .keep_all = T)
+Personality1$index <- 1:nrow(Personality1)
+#Personality1
+```
+
+```{r}
+n=250
+Per_feature<-Personality1[1:n,c(3,4,6,7,9,10,16)]
+Big5<-Personality1[1:n,c(11:16)]
+```
+
+
+```{r}
+colnames(Personality1)[16] <- "doc_id"
+colnames(Personality1)[2] <- "text"
+Per<-Personality1[1:n,c(2,16)]
+```
+
+# keep the emojis and acronyms
+```{r}
+smiles <- data.frame(s=c(":)",":(",";)",":D","<3","lol"),
+                     r=c("happyParen","unhappyParen","winkSmilen","DSmilen","heartParen","hhhParen"))
+
+library(stringi)
+## replace smiley with text
+Per$text <- stri_replace_all_fixed(Per$text,pattern = smiles$s,replacement = smiles$r,vectorize_all = FALSE)
+## remove punctuation
+Per$text <- gsub("[^a-z]", " ", Per$text, ignore.case = TRUE)
+#Per
+```
+
+
+```{r}
+nrc<-get_sentiments(lexicon = "nrc")
+```
+
+```{r,warning=FALSE}
+clean.corpus<-function(corpus){
+  #corpus<-tm_map(corpus,PlainTextDocument)
+  corpus<-tm_map(corpus,removePunctuation) #Remove Punctuations
+  corpus<- tm_map(corpus,content_transformer(tolower)) #Makes all text lowercase
+  corpus<-tm_map(corpus,removeNumbers)#Remove numbers
+  corpus<-tm_map(corpus,stripWhitespace) #Removes tabs and extra spaces
+  #corpus<-tm_map(corpus, stemDocument)# Perform word stemming
+
+  corpus<-tm_map(corpus, removeWords, stopwords("english")) #Remove common stopwords
+
+  # corpus<-tm_map(corpus,content_transformer(tryTolower))
+  # corpus<-tm_map(corpus,removeWords,custom.stopwords)
+  # corpus<-tm_map(corpus,removePunctuation)
+  # corpus<-tm_map(corpus,stripWhitespace)
+  # corpus<-tm_map(corpus,removeNumbers)
+  return(corpus)
+}
+```
+
+
+
+```{r}
+st.corp<-VCorpus(VectorSource(Per$text[1]))
+st.corp<-clean.corpus(st.corp)
+st.dtm<-DocumentTermMatrix(st.corp)
+st.tidy<-tidy(st.dtm)
+colnames(st.tidy)<-c("index","word","count")
+
+sentiment_t<-inner_join(st.tidy,nrc)
+
+sentiment_t<-count(sentiment_t,sentiment)
+colnames(sentiment_t)<-c("sentiment",1)
+```
+
+
+
+
+```{r}
+for (j in 2:250){
+  st.corp<-VCorpus(VectorSource(Per$text[j]))
+  st.corp<-clean.corpus(st.corp)
+  st.dtm<-DocumentTermMatrix(st.corp)
+  st.tidy<-tidy(st.dtm)
+  colnames(st.tidy)<-c("index","word","count")
+
+  st.sentiment<-inner_join(st.tidy,nrc)
+  st.sentiment<-count(st.sentiment,sentiment)
+  colnames(st.sentiment)<-c("sentiment",j)
+  #st.sentiment<-spread(st.sentiment,sentiment,n,fill=0)
+  sentiment_t<-merge(sentiment_t,st.sentiment,by="sentiment", all.x = TRUE)
+}
+```
+
+```{r}
+sentiment<-t(sentiment_t)
+sentiment<-as.data.frame(sentiment)
+colnames(sentiment) <- sentiment[1,]
+sentiment <- sentiment[-1,]
+sentiment[is.na(sentiment)]<-0
+sentiment=as.data.frame(lapply(sentiment,as.numeric))
+```
+
+
+```{r}
+senti_feature<-cbind(Per_feature,sentiment)
+```
+
+```{r}
+Pers_corpus <- VCorpus(DataframeSource(Per))
+#Pers_corpus[[4]]
+```
+
+
+```{r}
+# text mining
+Pers_corpus<-tm_map(Pers_corpus,PlainTextDocument)
+Pers_corpus<-tm_map(Pers_corpus,removePunctuation) #Remove Punctuations
+Pers_corpus <- tm_map(Pers_corpus,content_transformer(tolower)) #Makes all text lowercase
+Pers_corpus<-tm_map(Pers_corpus,removeNumbers)#Remove numbers
+Pers_corpus<-tm_map(Pers_corpus,stripWhitespace) #Removes tabs and extra spaces
+Pers_corpus<-tm_map(Pers_corpus, stemDocument)# Perform word stemming
+ 
+Pers_corpus<-tm_map(Pers_corpus, removeWords, stopwords("english")) #Remove common stopwords
+
+```
+
+```{r}
+# form a particular stop word list
+myStopwords <- c("can", "say","one","way","use",
+                                   "also","howev","tell","will",
+                                   "much","need","take","tend","even",
+                                   "particular","rather","said",
+                                   "get","well","make","ask","come","end",
+                                   "first","two","help","often","may",
+                                   "might","see","someth","thing","point",
+                                   "post","look","right","now","think","’ve ",
+                                   "’re ","propname","propnam","just","tri")
+Pers_corpus <- tm_map(Pers_corpus, removeWords, myStopwords)
+```
+
+
+#Making a document-term matrix
+```{r}
+# Create the dtm from the corpus: 
+Pers_dtm <- DocumentTermMatrix(Pers_corpus)
+```
+
+```{r}
+# Convert Pers_dtm to a matrix
+Pers_m <- as.matrix(Pers_dtm)
+# Print the dimensions of Pers_dtm
+dim(Pers_m)
+```
+
+
+```{r}
+d<-c("happyparen","unhappyparen","winksmilen","dsmilen","heartparen","hhhparen")
+Pers_smile<-Pers_m[1:n,d]
+Pers_smile<-as.data.frame(Pers_smile)
+Pers_smile$index <- 1:nrow(Pers_smile)
+```
+
+
+```{r}
+# Since the sparsity is so high, we remove some of these low frequency terms
+Pers_dtm_rm_sparse <- removeSparseTerms(Pers_dtm, 0.8) 
+Pers_m <- as.matrix(Pers_dtm_rm_sparse)
+dim(Pers_m)
+```
+
+
+```{r}
+Pers_word<-as.data.frame(Pers_m)
+
+Pers_word$index <- 1:nrow(Pers_word)
+```
+
+
+```{r}
+# obtain the data prepared for clustering
+total <- merge(senti_feature,Pers_smile,by="index")
+total_Per <- merge(total,Pers_word,by="index")
+total_Per<-select(total_Per,-matches("en.y"))
+total_Per1<-select(total_Per,-matches("index"))
+#total_Per1
+```
+
+## K-means clustering
+```{r,warning=FALSE}
+library(magrittr) # needs to be run every time you start R and want to use %>%
+# scale_numeric <- function(x) x %>% mutate_if(is.numeric, function(y) as.vector(scale(y))) 
+# Per_scaled <- total_Per1 %>% scale_numeric() 
+```
+
+
+
+```{r}
+# Determine number of clusters (K-means)
+n = 10
+clust = numeric(n)
+for (i in 1:n){
+  clust[i] = kmeans(total_Per1, i, nstart = 20)$tot.withinss
+}
+plot(1:10, clust, col = "darkred", lwd = 3, xlab = "Number of Clusters", type = "b",
+     ylab = "Total Within Cluster SS", col.axis = "navyblue")
+abline(v=4, lty=2)
+```
+
+```{r}
+ks <- 2:10
+d <- dist(total_Per1)
+str(d)
+ASW <- sapply(ks, FUN=function(k) {
+  fpc::cluster.stats(d, kmeans(total_Per1, centers=k, nstart = 5)$cluster)$avg.silwidth
+  })
+
+best_k <- ks[which.max(ASW)]
+best_k
+ggplot(as_tibble(ks, ASW), aes(ks, ASW)) + geom_line() +
+  geom_vline(xintercept = best_k, color = "red", linetype = 2)
+```
+
+
+```{r}
+set.seed(656)
+clu=4
+km <- kmeans(total_Per1, centers = clu, nstart = 10) 
+km
+```
+
+```{r}
+fviz_cluster(km, data = total_Per1, ellipse.type = "convex", palette = "jco", repel = TRUE, ggtheme = theme_minimal())
+```
+
+
+```{r}
+total_Per_clustered <- total_Per1 %>% add_column(cluster = factor(km$cluster)) 
+```
+
+```{r}
+ggplot(total_Per_clustered, aes(x = num_of_post, y = NETWORKSIZE,color=cluster)) + geom_point()
+```
+
+```{r}
+centroids <- as_tibble(km$centers, rownames = "cluster")
+centroids
+```
+
+```{r}
+total_Per.pca1<-prcomp(total_Per1,center=TRUE, scale = TRUE)
+#summary(total_Per.pca1)
+#fviz_eig(total_Per.pca1)
+```
+
+```{r}
+total_Per_transform = as.data.frame(-total_Per.pca1$x[,1:2])
+set.seed(656)
+km1 <- kmeans(total_Per_transform, centers = clu)
+fviz_cluster(km1, data = total_Per_transform,centroids = TRUE, repel = TRUE, ellipse.type = "convex")
+```
+
+
+```{r}
+# check outliers
+total_Per[c(4,10,16),]
+```
+
+```{r}
+total_Per_clustered1<-total_Per_clustered[total_Per_clustered$cluster==1,]
+#total_Per_clustered1
+total_Per_clustered2<-total_Per_clustered[total_Per_clustered$cluster==2,]
+#total_Per_clustered2
+```
+
+
+```{r}
+Big5_1 <- Big5 %>% add_column(cluster = factor(km$cluster)) 
+Big5_1<-select(Big5_1,-matches("index"))
+```
+
+```{r}
+Big5_2<-Big5_1
+Big5_2[,c(1:5)][Big5_2[,c(1:5)]=="y"]="1"
+Big5_2[,c(1:5)][Big5_2[,c(1:5)]=="n"]="0"
+```
+
+#Conduct one-way analysis of variance regarding personality class
+```{r}
+#conduct ANOVA for cEXT
+aov1 <- aov(cEXT~cluster, Big5_2)
+aov1
+summary(aov1)
+```
+
+```{r}
+#conduct ANOVA for cNEU
+aov2 <- aov(cNEU~cluster, Big5_2)
+aov2
+summary(aov2)
+```
+
+```{r}
+#conduct ANOVA for cAGR
+aov3 <- aov(cAGR~cluster, Big5_2)
+aov3
+summary(aov3)
+```
+
+```{r}
+#conduct ANOVA for cCON
+aov4 <- aov(cCON~cluster, Big5_2)
+aov4
+summary(aov4)
+```
+
+```{r}
+#conduct ANOVA for cOPN
+aov5 <- aov(cOPN~cluster, Big5_2)
+aov5
+summary(aov5)
+```
+
+```{r,warning=FALSE}
+library(ggplot2)
+library(reshape2)
+```
+
+#Bar chart for the distribution of each personality trait
+```{r}
+#cEXT
+Y<-c(0,0,0,0)
+N<-c(0,0,0,0)
+a<-data.frame(N,Y)
+Cluster_k<-c(1:4)
+cEXT_k<-cbind(Cluster_k,a)
+cEXT_k_p<-cEXT_k
+for(l in 1:clu){
+  Big5_clus=Big5_1[Big5_1$cluster == as.character(l),]
+  for(p in 1:2){
+  cEXT_k[l,(p+1)]<-as.numeric(table(Big5_clus[,1]))[p]
+  cEXT_k_p[l,(p+1)]<-as.numeric(table(Big5_clus[,1]))[p]/km$size[l]
+  }
+}
+cEXT_k
+cEXT_k_p
+
+cEXT_k_p <- melt(cEXT_k_p, id.vars = 1)
+ggplot(cEXT_k_p, aes(Cluster_k, value, fill = variable)) + 
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_manual(values = c("#599bd7", "#ed7d32")) +
+  theme_bw() +
+  ggtitle("Sociable vs Shy") +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "gray50"),
+    plot.title = element_text(size = 24, hjust = 0.5)
+  ) 
+```
+
+
+```{r}
+#cNEU
+cNEU_k<-cbind(Cluster_k,a)
+cNEU_k_p<-cNEU_k
+for(l in 1:clu){
+  Big5_clus=Big5_1[Big5_1$cluster == as.character(l),]
+  for(p in 1:2){
+  cNEU_k[l,(p+1)]<-as.numeric(table(Big5_clus[,2]))[p]
+  cNEU_k_p[l,(p+1)]<-as.numeric(table(Big5_clus[,2]))[p]/km$size[l]
+  }
+}
+cNEU_k
+cNEU_k_p
+
+cNEU_k_p <- melt(cNEU_k_p, id.vars = 1)
+ggplot(cNEU_k_p, aes(Cluster_k, value, fill = variable)) + 
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_manual(values = c("#599bd7", "#ed7d32")) +
+  theme_bw() +
+  ggtitle("Neurotic vs Calm") +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "gray50"),
+    plot.title = element_text(size = 24, hjust = 0.5)
+  ) 
+```
+
+```{r}
+#cAGR
+cAGR_k<-cbind(Cluster_k,a)
+cAGR_k_p<-cAGR_k
+for(l in 1:clu){
+  Big5_clus=Big5_1[Big5_1$cluster == as.character(l),]
+  for(p in 1:2){
+  cAGR_k[l,(p+1)]<-as.numeric(table(Big5_clus[,3]))[p]
+  cAGR_k_p[l,(p+1)]<-as.numeric(table(Big5_clus[,3]))[p]/km$size[l]
+  }
+}
+cAGR_k
+cAGR_k_p
+
+cAGR_k_p <- melt(cAGR_k_p, id.vars = 1)
+ggplot(cAGR_k_p, aes(Cluster_k, value, fill = variable)) + 
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_manual(values = c("#599bd7", "#ed7d32")) +
+  theme_bw() +
+  ggtitle("Friendly vs Uncooperative") +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "gray50"),
+    plot.title = element_text(size = 24, hjust = 0.5)
+  ) 
+```
+
+```{r}
+#cCON
+cCON_k<-cbind(Cluster_k,a)
+cCON_k_p<-cCON_k
+for(l in 1:clu){
+  Big5_clus=Big5_1[Big5_1$cluster == as.character(l),]
+  for(p in 1:2){
+  cCON_k[l,(p+1)]<-as.numeric(table(Big5_clus[,4]))[p]
+  cCON_k_p[l,(p+1)]<-as.numeric(table(Big5_clus[,4]))[p]/km$size[l]
+  }
+}
+cCON_k
+cCON_k_p
+
+cCON_k_p <- melt(cCON_k_p, id.vars = 1)
+ggplot(cCON_k_p, aes(Cluster_k, value, fill = variable)) + 
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_manual(values = c("#599bd7", "#ed7d32")) +
+  theme_bw() +
+  ggtitle("Organized vs Careless") +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "gray50"),
+    plot.title = element_text(size = 24, hjust = 0.5)
+  ) 
+```
+
+```{r}
+#cOPN
+cOPN_k<-cbind(Cluster_k,a)
+cOPN_k_p<-cOPN_k
+for(l in 1:clu){
+  Big5_clus=Big5_1[Big5_1$cluster == as.character(l),]
+  for(p in 1:2){
+  cOPN_k[l,(p+1)]<-as.numeric(table(Big5_clus[,5]))[p]
+  cOPN_k_p[l,(p+1)]<-as.numeric(table(Big5_clus[,5]))[p]/km$size[l]
+  }
+}
+cOPN_k
+cOPN_k_p
+
+cOPN_k_p <- melt(cOPN_k_p, id.vars = 1)
+ggplot(cOPN_k_p, aes(Cluster_k, value, fill = variable)) + 
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_manual(values = c("#599bd7", "#ed7d32")) +
+  theme_bw() +
+  ggtitle("Insightful vs Unimaginative") +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "gray50"),
+    plot.title = element_text(size = 24, hjust = 0.5)
+  ) 
+```
+
+#Distribution of personality traits for each cluster formed by K-means
+```{r}
+#Cluster 1
+Y<-c(0,0,0,0,0)
+N<-c(0,0,0,0,0)
+b<-data.frame(N,Y)
+Type_k<-c("x-typed","n-typed","a-typed","c-typed","o-typed")
+c1_k<-cbind(Type_k,b)
+c1_k_p<-c1_k
+Big5_clus=Big5_1[Big5_1$cluster == as.character(1),]
+for(r in 1:5){
+  for(s in 1:2){
+    #c1_k[r,(s+1)]<-as.numeric(table(Big5_clus[,1]))[s]
+    c1_k_p[r,(s+1)]<-as.numeric(table(Big5_clus[,r]))[s]/km$size[1]
+  }
+}
+c1_k_p
+
+c1_k_p <- melt(c1_k_p, id.vars = 1)
+ggplot(c1_k_p, aes(Type_k, value, fill = variable)) +
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_manual(values = c("#599bd7", "#ed7d32")) +
+  theme_bw() +
+  ggtitle("Cluster 1") +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "gray50"),
+    plot.title = element_text(size = 24, hjust = 0.5)
+  )
+```
+
+```{r}
+#Cluster 2
+c2_k<-cbind(Type_k,b)
+c2_k_p<-c2_k
+Big5_clus=Big5_1[Big5_1$cluster == as.character(2),]
+for(r in 1:5){
+  for(s in 1:2){
+    c2_k_p[r,(s+1)]<-as.numeric(table(Big5_clus[,r]))[s]/km$size[2]
+  }
+}
+c2_k_p
+
+c2_k_p <- melt(c2_k_p, id.vars = 1)
+ggplot(c2_k_p, aes(Type_k, value, fill = variable)) +
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_manual(values = c("#599bd7", "#ed7d32")) +
+  theme_bw() +
+  ggtitle("Cluster 2") +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "gray50"),
+    plot.title = element_text(size = 24, hjust = 0.5)
+  )
+```
+
+```{r}
+#Cluster 3
+c3_k<-cbind(Type_k,b)
+c3_k_p<-c3_k
+Big5_clus=Big5_1[Big5_1$cluster == as.character(3),]
+for(r in 1:5){
+  for(s in 1:2){
+    c3_k_p[r,(s+1)]<-as.numeric(table(Big5_clus[,r]))[s]/km$size[3]
+  }
+}
+c3_k_p
+
+c3_k_p <- melt(c3_k_p, id.vars = 1)
+ggplot(c3_k_p, aes(Type_k, value, fill = variable)) +
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_manual(values = c("#599bd7", "#ed7d32")) +
+  theme_bw() +
+  ggtitle("Cluster 3") +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "gray50"),
+    plot.title = element_text(size = 24, hjust = 0.5)
+  )
+```
+
+
+```{r}
+#Cluster 4
+c4_k<-cbind(Type_k,b)
+c4_k_p<-c4_k
+Big5_clus=Big5_1[Big5_1$cluster == as.character(4),]
+for(r in 1:5){
+  for(s in 1:2){
+    c4_k_p[r,(s+1)]<-as.numeric(table(Big5_clus[,r]))[s]/km$size[4]
+  }
+}
+c4_k_p
+
+c4_k_p <- melt(c4_k_p, id.vars = 1)
+ggplot(c4_k_p, aes(Type_k, value, fill = variable)) +
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_manual(values = c("#599bd7", "#ed7d32")) +
+  theme_bw() +
+  ggtitle("Cluster 4") +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "gray50"),
+    plot.title = element_text(size = 24, hjust = 0.5)
+  )
+```
+
+## Hierachical Clustering 
+```{r}
+d <- dist(total_Per1)  ## calculate the distance between each pair. 
+hc <- hclust(d, method = "complete") ## agglomerative hierarchical clustering
+plot(hc) 
+```
+
+```{r}
+fviz_dend(hc, k = clu) 
+```
+
+```{r}
+clusters <- cutree(hc, k = clu) 
+cluster_complete <- total_Per1 %>% 
+  add_column(cluster = factor(clusters)) 
+```
+
+
+```{r}
+Big5_hi <- Big5 %>% add_column(cluster = factor(clusters)) 
+Big5_hi<-select(Big5_hi,-matches("index"))
+```
+
+
+```{r}
+Big5_hi1<-Big5_hi
+Big5_hi1[,c(1:5)][Big5_hi1[,c(1:5)]=="y"]="1"
+Big5_hi1[,c(1:5)][Big5_hi1[,c(1:5)]=="n"]="0"
+```
+
+#Conduct one-way analysis of variance regarding personality class
+```{r}
+aov_hi1 <- aov(cEXT~cluster, Big5_hi1)
+aov_hi1
+summary(aov_hi1)
+```
+
+```{r}
+aov_hi2 <- aov(cNEU~cluster, Big5_hi1)
+aov_hi2
+summary(aov_hi2)
+```
+
+```{r}
+aov_hi3 <- aov(cAGR~cluster, Big5_hi1)
+aov_hi3
+summary(aov_hi3)
+```
+
+```{r}
+aov_hi4 <- aov(cCON~cluster, Big5_hi1)
+aov_hi4
+summary(aov_hi4)
+```
+
+```{r}
+aov_hi5 <- aov(cOPN~cluster, Big5_hi1)
+aov_hi5
+summary(aov_hi5)
+```
+
+```{r}
+cluster_hi<-Big5_hi %>% 
+  count(cluster)
+```
+
+#Bar chart for the distribution of each personality trait
+```{r}
+Y<-c(0,0,0,0)
+N<-c(0,0,0,0)
+a<-data.frame(N,Y)
+Cluster_h<-c(1:4)
+cEXT_h<-cbind(Cluster_h,a)
+cEXT_h_p<-cEXT_h
+for(l in 1:clu){
+  Big5hi_clus=Big5_hi[Big5_hi$cluster == as.character(l),]
+  for(p in 1:2){
+  cEXT_h[l,(p+1)]<-as.numeric(table(Big5hi_clus[,1]))[p]
+  cEXT_h_p[l,(p+1)]<-as.numeric(table(Big5hi_clus[,1]))[p]/as.numeric(cluster_hi[l,2])
+  }
+}
+cEXT_h
+cEXT_h_p
+
+cEXT_h_p <- melt(cEXT_h_p, id.vars = 1)
+ggplot(cEXT_h_p, aes(Cluster_h, value, fill = variable)) + 
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_manual(values = c("#599bd7", "#ed7d32")) +
+  theme_bw() +
+  ggtitle("Sociable vs Shy") +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "gray50"),
+    plot.title = element_text(size = 24, hjust = 0.5)
+  ) 
+```
+
+```{r}
+cNEU_h<-cbind(Cluster_h,a)
+cNEU_h_p<-cNEU_h
+for(l in 1:clu){
+  Big5hi_clus=Big5_hi[Big5_hi$cluster == as.character(l),]
+  for(p in 1:2){
+  cNEU_h[l,(p+1)]<-as.numeric(table(Big5hi_clus[,2]))[p]
+  cNEU_h_p[l,(p+1)]<-as.numeric(table(Big5hi_clus[,2]))[p]/as.numeric(cluster_hi[l,2])
+  }
+}
+cNEU_h
+cNEU_h_p
+
+cNEU_h_p <- melt(cNEU_h_p, id.vars = 1)
+ggplot(cNEU_h_p, aes(Cluster_h, value, fill = variable)) + 
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_manual(values = c("#599bd7", "#ed7d32")) +
+  theme_bw() +
+  ggtitle("Neurotic vs Calm") +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "gray50"),
+    plot.title = element_text(size = 24, hjust = 0.5)
+  ) 
+```
+
+```{r}
+cAGR_h<-cbind(Cluster_h,a)
+cAGR_h_p<-cAGR_h
+for(l in 1:clu){
+  Big5hi_clus=Big5_hi[Big5_hi$cluster == as.character(l),]
+  for(p in 1:2){
+  cAGR_h[l,(p+1)]<-as.numeric(table(Big5hi_clus[,3]))[p]
+  cAGR_h_p[l,(p+1)]<-as.numeric(table(Big5hi_clus[,3]))[p]/as.numeric(cluster_hi[l,2])
+  }
+}
+cAGR_h
+cAGR_h_p
+
+cAGR_h_p <- melt(cAGR_h_p, id.vars = 1)
+ggplot(cAGR_h_p, aes(Cluster_h, value, fill = variable)) + 
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_manual(values = c("#599bd7", "#ed7d32")) +
+  theme_bw() +
+  ggtitle("Friendly vs Uncooperative") +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "gray50"),
+    plot.title = element_text(size = 24, hjust = 0.5)
+  ) 
+```
+
+```{r}
+cCON_h<-cbind(Cluster_h,a)
+cCON_h_p<-cCON_h
+for(l in 1:clu){
+  Big5hi_clus=Big5_hi[Big5_hi$cluster == as.character(l),]
+  for(p in 1:2){
+  cCON_h[l,(p+1)]<-as.numeric(table(Big5hi_clus[,4]))[p]
+  cCON_h_p[l,(p+1)]<-as.numeric(table(Big5hi_clus[,4]))[p]/as.numeric(cluster_hi[l,2])
+  }
+}
+cCON_h
+cCON_h_p
+
+cCON_h_p <- melt(cCON_h_p, id.vars = 1)
+ggplot(cCON_h_p, aes(Cluster_h, value, fill = variable)) + 
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_manual(values = c("#599bd7", "#ed7d32")) +
+  theme_bw() +
+  ggtitle("Organized vs Careless") +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "gray50"),
+    plot.title = element_text(size = 24, hjust = 0.5)
+  ) 
+```
+
+```{r}
+cOPN_h<-cbind(Cluster_h,a)
+cOPN_h_p<-cOPN_h
+for(l in 1:clu){
+  Big5hi_clus=Big5_hi[Big5_hi$cluster == as.character(l),]
+  for(p in 1:2){
+  cOPN_h[l,(p+1)]<-as.numeric(table(Big5hi_clus[,5]))[p]
+  cOPN_h_p[l,(p+1)]<-as.numeric(table(Big5hi_clus[,5]))[p]/as.numeric(cluster_hi[l,2])
+  }
+}
+cOPN_h
+cOPN_h_p
+
+cOPN_h_p <- melt(cOPN_h_p, id.vars = 1)
+ggplot(cOPN_h_p, aes(Cluster_h, value, fill = variable)) + 
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_manual(values = c("#599bd7", "#ed7d32")) +
+  theme_bw() +
+  ggtitle("Insightful vs Unimaginative") +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "gray50"),
+    plot.title = element_text(size = 24, hjust = 0.5)
+  ) 
+```
+
