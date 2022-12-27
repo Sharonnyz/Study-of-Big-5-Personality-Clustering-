@@ -16,6 +16,17 @@ Personality of an individual is categorized into Big5 personality traits, which 
 
 ## Natural Language Process
 
+- Sentiment Analysis
+
+Utilizing the NRC Emotion Lexicon
+
+-  Text mining
+
+Utilizing the text mining framework provided by tm package in R
+
+
+
+
 The final samples for clustering had 250 observations and 147 features.
 
 
